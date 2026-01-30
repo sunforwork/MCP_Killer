@@ -2,6 +2,7 @@ import struct
 import zlib
 import json
 import os
+from typing import Callable, Optional
 
 MAGIC1, MAGIC2 = 0x267B0B11, 0xBDEB77DE
 MAGIC3, MAGIC4, MAGIC5 = 0x02040801, 0x7D7EBBDE, 0x00804021
@@ -107,7 +108,11 @@ def _hash_file(data: str | bytes) -> int:
         h1, h2 = _update_h1_h2(h1, h2, rot, chunk)
     return _finalize_h1_h2(h1, h2, rot)
 
-def pack_mcpk(input_dir: str, output_file: str) -> None:
+def pack_mcpk(
+    input_dir: str,
+    output_file: str,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
+) -> None:
     if input_dir is None or input_dir.strip() == "":
         print("[!] Input directory is empty")
         return
@@ -187,7 +192,7 @@ def pack_mcpk(input_dir: str, output_file: str) -> None:
         
         # write compressed data
         data_base_offset = f_out.tell()
-        for pos, node in index_entry_positions:
+        for idx, (pos, node) in enumerate(index_entry_positions):
             f_offset = f_out.tell() - data_base_offset
             if 'virtual_data' in node:
                 u_data = node['virtual_data']
@@ -205,6 +210,9 @@ def pack_mcpk(input_dir: str, output_file: str) -> None:
                 
             f_out.write(c_data)
             node['meta'] = (f_offset, c_size, u_size)
+            if progress_callback:
+                filename = os.path.basename(node.get('full_path', 'contents.json'))
+                progress_callback(idx + 1, num_total_files, filename)
         
         # write index metadata
         for pos, node in index_entry_positions:
@@ -224,7 +232,11 @@ def pack_mcpk(input_dir: str, output_file: str) -> None:
 
     print(f"[+] Successfully packed {num_total_files} files in {len(sorted_d_hashes)} directories.")
 
-def unpack_mcpk(file_path: str, output_dir: str) -> None:
+def unpack_mcpk(
+    file_path: str,
+    output_dir: str,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
+) -> None:
     if file_path is None or file_path.strip() == "":
         print("[!] Input file path is empty")
         return
@@ -333,7 +345,8 @@ def unpack_mcpk(file_path: str, output_dir: str) -> None:
         
         if contents_data is not None:
             del contents_data
-            for file_item in files_to_extract:
+            total_files = len(files_to_extract)
+            for idx, file_item in enumerate(files_to_extract, start=1):
                 file_path_str = file_item.get("path", "")
                 norm_path = file_path_str.replace('\\', '/')
                 
@@ -369,7 +382,11 @@ def unpack_mcpk(file_path: str, output_dir: str) -> None:
                     os.makedirs(os.path.dirname(out_path), exist_ok=True)
                     with open(out_path, 'wb') as out_f:
                         out_f.write(c_data)
+                if progress_callback:
+                    progress_callback(idx, total_files, norm_path)
         else:
+            total_files = sum(info["count"] for info in dir_map.values())
+            current_idx = 0
             for d_hash in dir_map:
                 out_dir = os.path.join(output_dir, f"{d_hash:08X}")
                 f.seek(index_base_offset + dir_map[d_hash]["offset"])
@@ -409,6 +426,9 @@ def unpack_mcpk(file_path: str, output_dir: str) -> None:
                         os.makedirs(out_dir, exist_ok=True)
                         with open(os.path.join(out_dir, name), 'wb') as out_f:
                             out_f.write(c_data)
+                    current_idx += 1
+                    if progress_callback:
+                        progress_callback(current_idx, total_files, name)
                     f.seek(pos)
 
 if __name__ == "__main__":
