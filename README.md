@@ -9,6 +9,14 @@ A utility for researching a game's script files, such as `vanilla.mcp`.
 ## Requirements
 Python 3.8 or higher.
 
+## Web UI
+The async web UI uses Flask + SQLAlchemy. Set `APP_PASSWORD` and optionally `SECRET_KEY`, then run:
+
+```
+python app.py
+python worker.py
+```
+
 ## Disclaimer
 - This tool is intended for educational purposes only. Use of this tool may violate software licenses or terms of service. 
 - Don't use this tool for malicious purposes. The author is not responsible for any misuse of this tool.

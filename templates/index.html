@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>MCP Processor</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f5f7fb; margin: 0; padding: 0; }
+        .container { max-width: 860px; margin: 40px auto; background: #fff; padding: 24px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .tabs { display: flex; gap: 12px; margin-bottom: 16px; }
+        .tab { border: 1px solid #ccd4e0; background: #f0f3f8; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
+        .tab.active { background: #2b6ef6; color: #fff; border-color: #2b6ef6; }
+        .status { margin-top: 24px; }
+        #task-progress { width: 100%; height: 20px; }
+        #task-log { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 6px; max-height: 240px; overflow-y: auto; white-space: pre-wrap; }
+        .error { color: #b91c1c; margin-bottom: 12px; }
+        .logout { float: right; }
+        .help { margin-bottom: 12px; color: #475569; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>MCP Processor</h1>
+    {% if not authenticated %}
+        {% if error %}<div class="error">{{ error }}</div>{% endif %}
+        <form method="post" action="{{ url_for('login') }}">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required>
+            <button type="submit">Login</button>
+        </form>
+    {% else %}
+        <form class="logout" method="post" action="{{ url_for('logout') }}">
+            <button type="submit">Logout</button>
+        </form>
+        <div style="clear: both"></div>
+        <div class="tabs">
+            <button type="button" class="tab active" data-type="unpack">Unpack MCPK</button>
+            <button type="button" class="tab" data-type="pack">Pack Directory</button>
+        </div>
+        <div id="task-help" class="help">Upload a MCPK file to unpack.</div>
+        <form id="task-form">
+            <input type="hidden" name="task_type" id="task_type" value="unpack">
+            <input type="file" id="file" name="file" required>
+            <button type="submit" id="submit-btn">Start</button>
+        </form>
+        <div class="status">
+            <div id="task-status">Idle</div>
+            <progress id="task-progress" max="100" value="0"></progress>
+            <div id="task-message"></div>
+            <pre id="task-log"></pre>
+            <a id="task-download" href="#" style="display:none;">Download result</a>
+        </div>
+    {% endif %}
+</div>
+{% if authenticated %}
+<script>
+    const tabs = document.querySelectorAll('.tab');
+    const taskTypeInput = document.getElementById('task_type');
+    const taskHelp = document.getElementById('task-help');
+    const form = document.getElementById('task-form');
+    const statusEl = document.getElementById('task-status');
+    const messageEl = document.getElementById('task-message');
+    const logEl = document.getElementById('task-log');
+    const progressEl = document.getElementById('task-progress');
+    const downloadEl = document.getElementById('task-download');
+    let pollTimer = null;
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            const type = tab.dataset.type;
+            taskTypeInput.value = type;
+            if (type === 'pack') {
+                taskHelp.textContent = 'Upload a ZIP of the directory you want to pack.';
+            } else {
+                taskHelp.textContent = 'Upload a MCPK file to unpack.';
+            }
+        });
+    });
+
+    const updateStatus = (data) => {
+        statusEl.textContent = `Status: ${data.status}`;
+        messageEl.textContent = data.message || '';
+        progressEl.value = data.progress || 0;
+        logEl.textContent = data.log || '';
+        if (data.download_url) {
+            downloadEl.href = data.download_url;
+            downloadEl.style.display = 'inline-block';
+        } else {
+            downloadEl.style.display = 'none';
+        }
+    };
+
+    const startPolling = (taskId) => {
+        if (pollTimer) {
+            clearInterval(pollTimer);
+        }
+        const poll = async () => {
+            try {
+                const response = await fetch(`/status/${taskId}`);
+                if (!response.ok) {
+                    return;
+                }
+                const data = await response.json();
+                updateStatus(data);
+                if (['completed', 'failed'].includes(data.status)) {
+                    clearInterval(pollTimer);
+                    pollTimer = null;
+                }
+            } catch (error) {
+                messageEl.textContent = 'Status check failed.';
+            }
+        };
+        poll();
+        pollTimer = setInterval(poll, 2000);
+    };
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const formData = new FormData(form);
+        statusEl.textContent = 'Uploading...';
+        messageEl.textContent = '';
+        logEl.textContent = '';
+        progressEl.value = 0;
+        downloadEl.style.display = 'none';
+        try {
+            const response = await fetch('/upload', {
+                method: 'POST',
+                body: formData,
+            });
+            if (!response.ok) {
+                const errorData = await response.json();
+                statusEl.textContent = 'Upload failed';
+                messageEl.textContent = errorData.error || 'Unknown error';
+                return;
+            }
+            const data = await response.json();
+            startPolling(data.task_id);
+        } catch (error) {
+            statusEl.textContent = 'Upload failed';
+            messageEl.textContent = 'Network error.';
+        }
+    });
+</script>
+{% endif %}
+</body>
+</html>
